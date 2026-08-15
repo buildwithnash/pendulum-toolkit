@@ -6,7 +6,7 @@ A zero-dependency, high-performance TypeScript control, trajectory optimization,
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-brightgreen.svg)](https://buildwithnash.github.io/pendulum-toolkit/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/Language-TypeScript%205.5-3178C6.svg)](https://www.typescriptlang.org/)
-[![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20runtime-brightgreen.svg)]()
+[![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20runtime-brightgreen.svg)](<>)
 
 > 🎮 **[Launch Live Interactive Canvas Demo →](https://buildwithnash.github.io/pendulum-toolkit/)**
 
@@ -14,7 +14,7 @@ A zero-dependency, high-performance TypeScript control, trajectory optimization,
 
 ## Overview
 
-The double inverted pendulum on a cart is a classic benchmark in underactuated nonlinear robotics: **one actuator** (horizontal force on the cart $u$) controls **three degrees of freedom** ($x$, $\theta_1$, $\theta_2$). 
+The double inverted pendulum on a cart is a classic benchmark in underactuated nonlinear robotics: **one actuator** (horizontal force on the cart $u$) controls **three degrees of freedom** ($x$, $\theta_1$, $\theta_2$).
 
 This toolkit provides modern control pipelines in pure TypeScript, running with zero runtime dependencies in **Node.js, Bun, and modern browsers**:
 
@@ -41,14 +41,15 @@ Read the complete technical deep dive and interactive essays at [davidnash.dev](
 
 Run on an Apple M-series processor (single-threaded JavaScript / V8):
 
-| Routine / Operation | Iterations | Mean Execution Time | Max Throughput |
-| :--- | :--- | :--- | :--- |
-| **RK4 Physics Step (6D non-linear)** | 100,000 | **~1.8 µs / step** | > 500 kHz |
-| **Continuous Riccati (CARE) Solve** | 100 | **~4.5 ms / solve** | ~220 Hz |
-| **Tracking MPC (1-Step RTI Gauss-Newton)** | 1,000 | **~0.35 ms / solve** | > 2,800 Hz |
-| **From-Scratch Energy NMPC (5 iterations)** | 200 | **~1.6 ms / solve** | ~600 Hz |
+| Routine / Operation                         | Iterations | Mean Execution Time  | Max Throughput |
+| :------------------------------------------ | :--------- | :------------------- | :------------- |
+| **RK4 Physics Step (6D non-linear)**        | 100,000    | **~1.8 µs / step**   | > 500 kHz      |
+| **Continuous Riccati (CARE) Solve**         | 100        | **~4.5 ms / solve**  | ~220 Hz        |
+| **Tracking MPC (1-Step RTI Gauss-Newton)**  | 1,000      | **~0.35 ms / solve** | > 2,800 Hz     |
+| **From-Scratch Energy NMPC (5 iterations)** | 200        | **~1.6 ms / solve**  | ~600 Hz        |
 
 Run the benchmark suite locally:
+
 ```bash
 pnpm run bench
 ```
@@ -69,7 +70,13 @@ pnpm add @buildwithnash/pendulum-toolkit
 ### 2. Upright Balancing & Hanging Brake with LQR
 
 ```typescript
-import { computeBalanceLQR, computeBrakeLQR, evaluateLQR, rk4, STATE_UPRIGHT } from '@buildwithnash/pendulum-toolkit';
+import {
+  computeBalanceLQR,
+  computeBrakeLQR,
+  evaluateLQR,
+  rk4,
+  STATE_UPRIGHT,
+} from '@buildwithnash/pendulum-toolkit';
 
 // Solve Continuous Algebraic Riccati Equation (CARE) about upright equilibrium
 const balance = computeBalanceLQR();
@@ -99,14 +106,22 @@ import {
 } from '@buildwithnash/pendulum-toolkit';
 
 const dt = 0.02; // 20 ms knot spacing
-const N = 200;   // 4.0 second horizon
+const N = 200; // 4.0 second horizon
 
 // Define stage and terminal costs with track and actuator limits
 const cost: CostFunction = {
-  run(s, u) { return 0.5 * 0.05 * u * u + 0.5 * (s[0]**2 + s[2]**2 + s[4]**2); },
-  term(s) { return 500 * (s[0]**2 + 10 * s[2]**2 + 10 * s[4]**2); },
-  runDeriv(s, u) { /* gradients & hessians */ },
-  termDeriv(s) { /* terminal gradients & hessians */ }
+  run(s, u) {
+    return 0.5 * 0.05 * u * u + 0.5 * (s[0] ** 2 + s[2] ** 2 + s[4] ** 2);
+  },
+  term(s) {
+    return 500 * (s[0] ** 2 + 10 * s[2] ** 2 + 10 * s[4] ** 2);
+  },
+  runDeriv(s, u) {
+    /* gradients & hessians */
+  },
+  termDeriv(s) {
+    /* terminal gradients & hessians */
+  },
 };
 
 const uGuess = new Array(N).fill(0);
@@ -114,7 +129,14 @@ const trajectory = ilqr(STATE_HANGING, uGuess, dt, cost, { maxIter: 300 });
 
 // Compute TVLQR tracking gains K(t) initialized with steady-state balance P
 const balance = computeBalanceLQR();
-const trackingGains = computeTVLQR(trajectory.xs, trajectory.us, dt, [10, 1, 150, 10, 150, 10], 0.1, balance.P);
+const trackingGains = computeTVLQR(
+  trajectory.xs,
+  trajectory.us,
+  dt,
+  [10, 1, 150, 10, 150, 10],
+  0.1,
+  balance.P
+);
 ```
 
 ---
@@ -140,12 +162,18 @@ setInterval(() => {
 ### 5. Hardware Realism: Transport Delay & Stiction Compensation
 
 ```typescript
-import { HardwareBench, predictForward, computeBalanceLQR, evaluateLQR, STATE_UPRIGHT } from '@buildwithnash/pendulum-toolkit';
+import {
+  HardwareBench,
+  predictForward,
+  computeBalanceLQR,
+  evaluateLQR,
+  STATE_UPRIGHT,
+} from '@buildwithnash/pendulum-toolkit';
 
 const bench = new HardwareBench([0, 0, 0.08, 0, -0.05, 0], {
-  loopDelay: 0.04,        // 40 ms transport / loop latency
-  coulombFriction: 0.8,   // 0.8 N dry Coulomb friction
-  encoderBits: 14,        // 14-bit angular encoder quantization
+  loopDelay: 0.04, // 40 ms transport / loop latency
+  coulombFriction: 0.8, // 0.8 N dry Coulomb friction
+  encoderBits: 14, // 14-bit angular encoder quantization
 });
 
 const balance = computeBalanceLQR();
@@ -156,7 +184,7 @@ for (let i = 0; i < 2000; i++) {
 
   // Model-based state prediction across loop delay with friction feedforward
   const predicted = predictForward(measured, bench.getControlHistory(), dt, 0.04, {
-    coulombEstimate: 0.8 * 0.85
+    coulombEstimate: 0.8 * 0.85,
   });
 
   const u = evaluateLQR(predicted, balance.K, STATE_UPRIGHT);
@@ -170,21 +198,21 @@ for (let i = 0; i < 2000; i++) {
 
 When studying control theory papers (Todorov, Tassa, Tedrake) and working with this codebase, here is a quick mapping of key terms and variable names:
 
-| Mathematical Symbol | Code Variable | Concept & Intuition |
-| :--- | :--- | :--- |
-| $\mathbf{s} = [x, v, \theta_1, \omega_1, \theta_2, \omega_2]^T$ | `s`, `xs` | **State Vector**: Cart position ($x$) & velocity ($v$), Link 1 angle ($\theta_1$) & rate ($\omega_1$), Link 2 angle ($\theta_2$) & rate ($\omega_2$). Upright is $0$, hanging is $\pm\pi$. |
-| $u$ | `u`, `us` | **Control Input**: Horizontal force in Newtons applied to the cart. |
-| $\mathbf{Q}, R, \mathbf{Q}_f$ | `Q`, `R`, `Qf` | **Cost Matrices**: State error penalty ($Q$), control effort penalty ($R$), and terminal goal penalty ($Q_f$). |
-| $\mathbf{P}$ | `P`, `P_BALANCE` | **Cost-to-Go Matrix**: Steady-state Riccati solution ($V(x) = \frac{1}{2} x^T P x$) from CARE. |
-| $\mathbf{V}_x, \mathbf{V}_{xx}$ | `Vx`, `Vxx` | **Value Function Gradient & Hessian**: Slope and curvature of total remaining cost from current state forward. |
-| $\mathbf{Q}_x, Q_u$ | `Qx`, `Qu` | **Action-Value Gradient**: First derivatives of total cost w.r.t. state and control. |
-| $\mathbf{Q}_{xx}, \mathbf{Q}_{ux}, Q_{uu}$ | `Qxx`, `Qux`, `Quu` | **Action-Value Curvature**: Second derivatives of cost. Single-actuator control makes $Q_{uu}$ a scalar! |
-| $\mathbf{k}_t$ | `ks`, `k_t` | **Feedforward Adjustment**: $-Q_{uu,\text{reg}}^{-1} Q_u$ (nominal force adjustment step). |
-| $\mathbf{K}_t$ | `Ks`, `K_t` | **Feedback Gain Matrix**: $-Q_{uu,\text{reg}}^{-1} Q_{ux}$ (real-time corrective feedback rule). |
-| $\mu$ | `mu` | **Levenberg-Marquardt Damping**: Regularization added to $Q_{uu}$ ($Q_{uu} + \mu$) to ensure positive curvature and convex steps. |
-| $\alpha$ | `alphas`, `a` | **Line Search Factor**: Step size scalar along the search direction ($\alpha \in [1.0, 0.8, \dots, 0.005]$). |
+| Mathematical Symbol                                             | Code Variable       | Concept & Intuition                                                                                                                                                                        |
+| :-------------------------------------------------------------- | :------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| $\mathbf{s} = [x, v, \theta_1, \omega_1, \theta_2, \omega_2]^T$ | `s`, `xs`           | **State Vector**: Cart position ($x$) & velocity ($v$), Link 1 angle ($\theta_1$) & rate ($\omega_1$), Link 2 angle ($\theta_2$) & rate ($\omega_2$). Upright is $0$, hanging is $\pm\pi$. |
+| $u$                                                             | `u`, `us`           | **Control Input**: Horizontal force in Newtons applied to the cart.                                                                                                                        |
+| $\mathbf{Q}, R, \mathbf{Q}_f$                                   | `Q`, `R`, `Qf`      | **Cost Matrices**: State error penalty ($Q$), control effort penalty ($R$), and terminal goal penalty ($Q_f$).                                                                             |
+| $\mathbf{P}$                                                    | `P`, `P_BALANCE`    | **Cost-to-Go Matrix**: Steady-state Riccati solution ($V(x) = \frac{1}{2} x^T P x$) from CARE.                                                                                             |
+| $\mathbf{V}_x, \mathbf{V}_{xx}$                                 | `Vx`, `Vxx`         | **Value Function Gradient & Hessian**: Slope and curvature of total remaining cost from current state forward.                                                                             |
+| $\mathbf{Q}_x, Q_u$                                             | `Qx`, `Qu`          | **Action-Value Gradient**: First derivatives of total cost w.r.t. state and control.                                                                                                       |
+| $\mathbf{Q}_{xx}, \mathbf{Q}_{ux}, Q_{uu}$                      | `Qxx`, `Qux`, `Quu` | **Action-Value Curvature**: Second derivatives of cost. Single-actuator control makes $Q_{uu}$ a scalar!                                                                                   |
+| $\mathbf{k}_t$                                                  | `ks`, `k_t`         | **Feedforward Adjustment**: $-Q_{uu,\text{reg}}^{-1} Q_u$ (nominal force adjustment step).                                                                                                 |
+| $\mathbf{K}_t$                                                  | `Ks`, `K_t`         | **Feedback Gain Matrix**: $-Q_{uu,\text{reg}}^{-1} Q_{ux}$ (real-time corrective feedback rule).                                                                                           |
+| $\mu$                                                           | `mu`                | **Levenberg-Marquardt Damping**: Regularization added to $Q_{uu}$ ($Q_{uu} + \mu$) to ensure positive curvature and convex steps.                                                          |
+| $\alpha$                                                        | `alphas`, `a`       | **Line Search Factor**: Step size scalar along the search direction ($\alpha \in [1.0, 0.8, \dots, 0.005]$).                                                                               |
 
-*(See [`docs/cheatsheet.md`](docs/cheatsheet.md) for the complete comprehensive reference table).*
+_(See [`docs/cheatsheet.md`](docs/cheatsheet.md) for the complete comprehensive reference table)._
 
 ---
 
@@ -195,6 +223,7 @@ The repository includes a self-contained, zero-build HTML5 Canvas visualizer:
 🎮 **[Click here to open the Live GitHub Pages Demo](https://buildwithnash.github.io/pendulum-toolkit/)**
 
 Or open [`examples/browser-demo/index.html`](examples/browser-demo/index.html) locally in any browser to:
+
 - Drag the cart or push links with the mouse.
 - Switch between **LQR Balance**, **Hanging Brake**, and **Passive Swing**.
 - Inspect live metrics: cart position, link angles, total energy, and commanded force.

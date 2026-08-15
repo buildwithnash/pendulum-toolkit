@@ -17,11 +17,7 @@ describe('iLQR Trajectory Optimizer', () => {
         );
       },
       term(s: State) {
-        return (
-          100 * s[0] * s[0] +
-          500 * (1 - Math.cos(s[2])) +
-          500 * (1 - Math.cos(s[4]))
-        );
+        return 100 * s[0] * s[0] + 500 * (1 - Math.cos(s[2])) + 500 * (1 - Math.cos(s[4]));
       },
       runDeriv(s: State, u: number) {
         const lx = new Float64Array(STATE_DIM);
@@ -68,13 +64,9 @@ describe('iLQR Trajectory Optimizer', () => {
 
     // Final state error should be smaller than initial uncontrolled fall
     const finalErr =
-      Math.abs(result.xs[N][0]) +
-      (1 - Math.cos(result.xs[N][2])) +
-      (1 - Math.cos(result.xs[N][4]));
+      Math.abs(result.xs[N][0]) + (1 - Math.cos(result.xs[N][2])) + (1 - Math.cos(result.xs[N][4]));
     const unforcedErr =
-      Math.abs(xsInit[N][0]) +
-      (1 - Math.cos(xsInit[N][2])) +
-      (1 - Math.cos(xsInit[N][4]));
+      Math.abs(xsInit[N][0]) + (1 - Math.cos(xsInit[N][2])) + (1 - Math.cos(xsInit[N][4]));
 
     expect(finalErr).toBeLessThan(unforcedErr);
   });

@@ -4,7 +4,6 @@ import {
   EnergyNMPC,
   TrackingMPC,
   TrajectoryInterpolation,
-  STATE_UPRIGHT,
   State,
   DEFAULT_PLANT_PARAMS,
 } from '../src/index.js';
@@ -71,10 +70,22 @@ const nmpcTotalMs = performance.now() - tNmpcStart;
 const nmpcMs = nmpcTotalMs / NMPC_ITERS;
 
 // Print Benchmark Results Table
-console.log('| Routine / Operation                 | Iterations | Mean Time         | Max Frequency       |');
-console.log('| :---------------------------------- | :--------- | :---------------- | :------------------ |');
-console.log(`| RK4 Physics Step (6D non-linear)    | 100,000    | ${rk4Microseconds.toFixed(2).padStart(6, ' ')} µs/step    | ${(1000 / (rk4Microseconds / 1000) / 1000).toFixed(0)} kHz            |`);
-console.log(`| Continuous Riccati (CARE) Solve     | 100        | ${careMs.toFixed(2).padStart(6, ' ')} ms/solve   | ${(1000 / careMs).toFixed(0)} Hz              |`);
-console.log(`| Tracking MPC (RTI 1-Step Gauss-Newt)| 1,000      | ${rtiMs.toFixed(3).padStart(6, ' ')} ms/solve   | ${(1000 / rtiMs).toFixed(0)} Hz              |`);
-console.log(`| Online Energy NMPC (5 iterations)   | 200        | ${nmpcMs.toFixed(2).padStart(6, ' ')} ms/solve   | ${(1000 / nmpcMs).toFixed(0)} Hz              |`);
+console.log(
+  '| Routine / Operation                 | Iterations | Mean Time         | Max Frequency       |'
+);
+console.log(
+  '| :---------------------------------- | :--------- | :---------------- | :------------------ |'
+);
+console.log(
+  `| RK4 Physics Step (6D non-linear)    | 100,000    | ${rk4Microseconds.toFixed(2).padStart(6, ' ')} µs/step    | ${(1000 / (rk4Microseconds / 1000) / 1000).toFixed(0)} kHz            |`
+);
+console.log(
+  `| Continuous Riccati (CARE) Solve     | 100        | ${careMs.toFixed(2).padStart(6, ' ')} ms/solve   | ${(1000 / careMs).toFixed(0)} Hz              |`
+);
+console.log(
+  `| Tracking MPC (RTI 1-Step Gauss-Newt)| 1,000      | ${rtiMs.toFixed(3).padStart(6, ' ')} ms/solve   | ${(1000 / rtiMs).toFixed(0)} Hz              |`
+);
+console.log(
+  `| Online Energy NMPC (5 iterations)   | 200        | ${nmpcMs.toFixed(2).padStart(6, ' ')} ms/solve   | ${(1000 / nmpcMs).toFixed(0)} Hz              |`
+);
 console.log('\nAll benchmarks executed synchronously in pure single-threaded JavaScript/V8.');
