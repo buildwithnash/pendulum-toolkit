@@ -224,9 +224,14 @@ The repository includes a self-contained, zero-build HTML5 Canvas visualizer:
 
 Or open [`examples/browser-demo/index.html`](examples/browser-demo/index.html) locally in any browser to:
 
-- Drag the cart or push links with the mouse.
-- Switch between **LQR Balance**, **Hanging Brake**, and **Passive Swing**.
-- Inspect live metrics: cart position, link angles, total energy, and commanded force.
+- **Switch Modes**:
+  - **Auto (iLQR + TVLQR &rarr; LQR)**: Smooth precomputed 4.0s swing-up with linear feedback tracking and automatic steady-state balance handover.
+  - **Real-Time Energy NMPC**: From-scratch online trajectory discovery and catch without precomputed references.
+  - **Hold Balance LQR & Hanging Brake**: Steady-state CARE Riccati equilibrium regulators.
+- **Real-Time Horizon Prediction Ghosts**: Visualizes the solver's rolling planned trajectory fanning out in translucent preview links ahead of the cart.
+- **Live Compute Speed & Budget Telemetry**: Color-coded monitor verifying real-time loop feasibility at 100 Hz / 200 Hz.
+- **Interactive Tuning**: Adjust control loop frequency (20–200 Hz) and horizon length (0.5–1.5s) on the fly.
+- **Direct Disturbance Testing**: Drag the cart with mouse/touch or inject velocity perturbations to stress test controller stability.
 
 ---
 
