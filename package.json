@@ -1,0 +1,57 @@
+{
+  "name": "@buildwithnash/pendulum-toolkit",
+  "version": "1.0.0",
+  "description": "Zero-dependency TypeScript control, trajectory optimization, and simulation toolkit for underactuated double inverted pendulums (iLQR, TVLQR, NMPC, Riccati/LQR).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "tsc --noEmit && prettier --check . && eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "bench": "tsx examples/05-benchmark.ts",
+    "example:swingup": "tsx examples/01-solve-swingup.ts",
+    "example:lqr": "tsx examples/02-balance-and-brake.ts",
+    "example:nmpc": "tsx examples/03-realtime-nmpc.ts",
+    "example:bench": "tsx examples/04-bench-hardware.ts"
+  },
+  "keywords": [
+    "robotics",
+    "control-theory",
+    "double-pendulum",
+    "ilqr",
+    "tvlqr",
+    "nmpc",
+    "lqr",
+    "riccati",
+    "trajectory-optimization",
+    "simulation"
+  ],
+  "author": "David Nash <david@davidnash.dev> (https://davidnash.dev)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/buildwithnash/pendulum-toolkit.git"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "eslint": "^9.9.0",
+    "prettier": "^3.3.3",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^2.0.0"
+  }
+}

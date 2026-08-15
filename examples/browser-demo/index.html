@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Double Inverted Pendulum — Zero-Dependency Control Toolkit</title>
+    <style>
+      :root {
+        --bg: #090d13;
+        --panel: #111822;
+        --border: #1e293b;
+        --text: #e2e8f0;
+        --dim: #94a3b8;
+        --accent: #38bdf8;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --danger: #f87171;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-height: 100vh;
+        padding: 20px;
+      }
+      header {
+        text-align: center;
+        margin-bottom: 16px;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: -0.02em;
+      }
+      p.sub {
+        color: var(--dim);
+        font-size: 0.88rem;
+        margin-top: 4px;
+      }
+      .main-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        width: 100%;
+        max-width: 900px;
+      }
+      canvas {
+        background: #0d131c;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        cursor: grab;
+        touch-action: none;
+        width: 100%;
+        height: auto;
+        max-height: 480px;
+      }
+      canvas:active {
+        cursor: grabbing;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: center;
+        background: var(--panel);
+        padding: 12px 16px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        width: 100%;
+      }
+      button {
+        background: #1e293b;
+        color: var(--text);
+        border: 1px solid #334155;
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      button:hover {
+        background: #273549;
+        border-color: var(--accent);
+      }
+      button.active {
+        background: #0369a1;
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 10px;
+        width: 100%;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        padding: 10px 14px;
+        border-radius: 8px;
+        text-align: center;
+      }
+      .card .label {
+        font-size: 0.75rem;
+        color: var(--dim);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .card .val {
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-top: 2px;
+        font-family: monospace;
+        color: var(--accent);
+      }
+      footer {
+        margin-top: 20px;
+        font-size: 0.8rem;
+        color: var(--dim);
+        text-align: center;
+      }
+      footer a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      footer a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Double Inverted Pendulum Interactive Simulation</h1>
+      <p class="sub">Underactuated Robotics Control Toolkit · Pure Client-Side Math & Physics</p>
+    </header>
+
+    <div class="main-container">
+      <canvas id="simCanvas" width="900" height="480"></canvas>
+
+      <div class="controls">
+        <button id="btnLQR" class="active" onclick="setMode('balance')">LQR Balance</button>
+        <button id="btnBrake" onclick="setMode('brake')">Hanging Brake</button>
+        <button id="btnPassive" onclick="setMode('passive')">Passive (Free Swing)</button>
+        <button onclick="shoveCart(-25)">Shove Left</button>
+        <button onclick="shoveCart(25)">Shove Right</button>
+        <button onclick="resetHanging()">Drop (Hanging)</button>
+        <button onclick="resetUpright()">Reset Upright</button>
+      </div>
+
+      <div class="metrics">
+        <div class="card">
+          <div class="label">Mode</div>
+          <div class="val" id="metricMode" style="color: var(--success)">BALANCE</div>
+        </div>
+        <div class="card">
+          <div class="label">Cart Pos (x)</div>
+          <div class="val" id="metricX">0.00 m</div>
+        </div>
+        <div class="card">
+          <div class="label">Angle θ1</div>
+          <div class="val" id="metricTh1">0.0°</div>
+        </div>
+        <div class="card">
+          <div class="label">Angle θ2</div>
+          <div class="val" id="metricTh2">0.0°</div>
+        </div>
+        <div class="card">
+          <div class="label">Total Energy</div>
+          <div class="val" id="metricEnergy">19.62 J</div>
+        </div>
+        <div class="card">
+          <div class="label">Control Force</div>
+          <div class="val" id="metricForce">0.0 N</div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Read the full control write-up and theory at
+      <a href="https://davidnash.dev" target="_blank">davidnash.dev</a> · Open source on
+      <a href="https://github.com/buildwithnash/pendulum-toolkit" target="_blank">GitHub</a>
+    </footer>
+
+    <script>
+      // --- Physical Constants ---
+      const P = {
+        g: 9.81,
+        M: 1.0,
+        m1: 1.0,
+        m2: 1.0,
+        L1: 1.0,
+        L2: 1.0,
+        jointDamp: 0.02,
+        cartDamp: 0.1,
+      };
+      const d1 = P.M + P.m1 + P.m2;
+      const d2 = (0.5 * P.m1 + P.m2) * P.L1;
+      const d3 = 0.5 * P.m2 * P.L2;
+      const d4 = ((1 / 3) * P.m1 + P.m2) * P.L1 * P.L1;
+      const d5 = 0.5 * P.m2 * P.L1 * P.L2;
+      const d6 = (1 / 3) * P.m2 * P.L2 * P.L2;
+      const f1 = (0.5 * P.m1 + P.m2) * P.g * P.L1;
+      const f2 = 0.5 * P.m2 * P.g * P.L2;
+
+      function wrapPi(a) {
+        let v = a % (2 * Math.PI);
+        if (v > Math.PI) v -= 2 * Math.PI;
+        if (v < -Math.PI) v += 2 * Math.PI;
+        return v;
+      }
+
+      function inv3(m) {
+        const det =
+          m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) -
+          m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+          m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        const id = 1 / det;
+        return [
+          [
+            (m[1][1] * m[2][2] - m[2][1] * m[1][2]) * id,
+            (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * id,
+            (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * id,
+          ],
+          [
+            (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * id,
+            (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * id,
+            (m[1][0] * m[0][2] - m[0][0] * m[1][2]) * id,
+          ],
+          [
+            (m[1][0] * m[2][1] - m[2][0] * m[1][1]) * id,
+            (m[2][0] * m[0][1] - m[0][0] * m[2][1]) * id,
+            (m[0][0] * m[1][1] - m[1][0] * m[0][1]) * id,
+          ],
+        ];
+      }
+
+      function dynamics(s, u) {
+        const [, v, th1, w1, th2, w2] = s;
+        const c1 = Math.cos(th1),
+          c2 = Math.cos(th2),
+          c12 = Math.cos(th1 - th2);
+        const s1 = Math.sin(th1),
+          s2 = Math.sin(th2),
+          s12 = Math.sin(th1 - th2);
+
+        const Mm = [
+          [d1, d2 * c1, d3 * c2],
+          [d2 * c1, d4, d5 * c12],
+          [d3 * c2, d5 * c12, d6],
+        ];
+        const h1 = -d2 * w1 * w1 * s1 - d3 * w2 * w2 * s2 + P.cartDamp * v;
+        const h2 = d5 * w2 * w2 * s12 - f1 * s1 + P.jointDamp * w1;
+        const h3 = -d5 * w1 * w1 * s12 - f2 * s2 + P.jointDamp * w2;
+
+        const Mi = inv3(Mm);
+        const r0 = u - h1,
+          r1 = -h2,
+          r2 = -h3;
+        return [
+          v,
+          Mi[0][0] * r0 + Mi[0][1] * r1 + Mi[0][2] * r2,
+          w1,
+          Mi[1][0] * r0 + Mi[1][1] * r1 + Mi[1][2] * r2,
+          w2,
+          Mi[2][0] * r0 + Mi[2][1] * r1 + Mi[2][2] * r2,
+        ];
+      }
+
+      function rk4(s, u, dt) {
+        const k1 = dynamics(s, u);
+        const s2 = s.map((z, i) => z + 0.5 * dt * k1[i]);
+        const k2 = dynamics(s2, u);
+        const s3 = s.map((z, i) => z + 0.5 * dt * k2[i]);
+        const k3 = dynamics(s3, u);
+        const s4 = s.map((z, i) => z + dt * k3[i]);
+        const k4 = dynamics(s4, u);
+        return s.map((z, i) => z + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+      }
+
+      function computeEnergy(s) {
+        const [, v, th1, w1, th2, w2] = s;
+        const vx1 = v + 0.5 * P.L1 * w1 * Math.cos(th1);
+        const vy1 = 0.5 * P.L1 * w1 * Math.sin(th1);
+        const vx2 = v + P.L1 * w1 * Math.cos(th1) + 0.5 * P.L2 * w2 * Math.cos(th2);
+        const vy2 = P.L1 * w1 * Math.sin(th1) + 0.5 * P.L2 * w2 * Math.sin(th2);
+        const I1 = (P.m1 * P.L1 * P.L1) / 12;
+        const I2 = (P.m2 * P.L2 * P.L2) / 12;
+        const T =
+          0.5 * P.M * v * v +
+          0.5 * P.m1 * (vx1 * vx1 + vy1 * vy1) +
+          0.5 * I1 * w1 * w1 +
+          0.5 * P.m2 * (vx2 * vx2 + vy2 * vy2) +
+          0.5 * I2 * w2 * w2;
+        const V =
+          P.m1 * P.g * (0.5 * P.L1 * Math.cos(th1)) +
+          P.m2 * P.g * (P.L1 * Math.cos(th1) + 0.5 * P.L2 * Math.cos(th2));
+        return T + V;
+      }
+
+      // Precomputed Gains
+      const K_BALANCE = [-8.9443, -13.0645, 172.9377, 44.9754, -204.6063, -48.2435];
+      const K_BRAKE = [-22.3607, -13.0336, 12.3995, 3.2085, 3.8682, 0.9996];
+
+      // State & UI
+      let state = [0, 0, 0.05, 0, -0.03, 0];
+      let mode = 'balance';
+      let commandedU = 0;
+      let draggingCart = false;
+
+      const canvas = document.getElementById('simCanvas');
+      const ctx = canvas.getContext('2d');
+
+      function setMode(m) {
+        mode = m;
+        document.querySelectorAll('.controls button').forEach((b) => b.classList.remove('active'));
+        if (m === 'balance') document.getElementById('btnLQR').classList.add('active');
+        if (m === 'brake') document.getElementById('btnBrake').classList.add('active');
+        if (m === 'passive') document.getElementById('btnPassive').classList.add('active');
+        document.getElementById('metricMode').textContent = m.toUpperCase();
+      }
+
+      function shoveCart(force) {
+        state[1] += force * 0.05;
+      }
+
+      function resetHanging() {
+        state = [0, 0, Math.PI, 0, Math.PI, 0];
+      }
+
+      function resetUpright() {
+        state = [0, 0, 0.02, 0, -0.01, 0];
+      }
+
+      // Physics Loop @ fixed dt
+      const DT_PHYSICS = 0.002;
+      let lastTime = performance.now();
+
+      function loop(now) {
+        const elapsed = Math.min((now - lastTime) / 1000, 0.1);
+        lastTime = now;
+
+        const subSteps = Math.round(elapsed / DT_PHYSICS) || 1;
+        for (let step = 0; step < subSteps; step++) {
+          if (!draggingCart) {
+            if (mode === 'balance') {
+              commandedU = 0;
+              const err = [
+                state[0],
+                state[1],
+                wrapPi(state[2]),
+                state[3],
+                wrapPi(state[4]),
+                state[5],
+              ];
+              for (let i = 0; i < 6; i++) commandedU -= K_BALANCE[i] * err[i];
+              commandedU = Math.max(-120, Math.min(120, commandedU));
+            } else if (mode === 'brake') {
+              commandedU = 0;
+              const err = [
+                state[0],
+                state[1],
+                wrapPi(state[2] - Math.PI),
+                state[3],
+                wrapPi(state[4] - Math.PI),
+                state[5],
+              ];
+              for (let i = 0; i < 6; i++) commandedU -= K_BRAKE[i] * err[i];
+              commandedU = Math.max(-100, Math.min(100, commandedU));
+            } else {
+              commandedU = 0;
+            }
+          } else {
+            commandedU = 0;
+          }
+
+          state = rk4(state, commandedU, DT_PHYSICS);
+          // Track boundaries
+          if (state[0] > 3.0) {
+            state[0] = 3.0;
+            state[1] = 0;
+          }
+          if (state[0] < -3.0) {
+            state[0] = -3.0;
+            state[1] = 0;
+          }
+        }
+
+        render();
+        updateMetrics();
+        requestAnimationFrame(loop);
+      }
+
+      function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2 + 60;
+        const scale = 110; // px per meter
+
+        // Rail
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(cx - 3.2 * scale, cy);
+        ctx.lineTo(cx + 3.2 * scale, cy);
+        ctx.stroke();
+
+        // Rail markings
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1;
+        for (let m = -3; m <= 3; m++) {
+          ctx.beginPath();
+          ctx.moveTo(cx + m * scale, cy - 6);
+          ctx.lineTo(cx + m * scale, cy + 6);
+          ctx.stroke();
+        }
+
+        // Cart
+        const cartX = cx + state[0] * scale;
+        const cartW = 60,
+          cartH = 30;
+        ctx.fillStyle = '#38bdf8';
+        ctx.shadowColor = 'rgba(56, 189, 248, 0.4)';
+        ctx.shadowBlur = 10;
+        ctx.fillRect(cartX - cartW / 2, cy - cartH / 2, cartW, cartH);
+        ctx.shadowBlur = 0;
+
+        // Link 1
+        const x1 = cartX + Math.sin(state[2]) * P.L1 * scale;
+        const y1 = cy - Math.cos(state[2]) * P.L1 * scale;
+
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cartX, cy);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
+
+        // Link 2
+        const x2 = x1 + Math.sin(state[4]) * P.L2 * scale;
+        const y2 = y1 - Math.cos(state[4]) * P.L2 * scale;
+
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        // Joints
+        ctx.fillStyle = '#f87171';
+        ctx.beginPath();
+        ctx.arc(cartX, cy, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(x1, y1, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x2, y2, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function updateMetrics() {
+        document.getElementById('metricX').textContent = state[0].toFixed(2) + ' m';
+        document.getElementById('metricTh1').textContent =
+          ((wrapPi(state[2]) * 180) / Math.PI).toFixed(1) + '°';
+        document.getElementById('metricTh2').textContent =
+          ((wrapPi(state[4]) * 180) / Math.PI).toFixed(1) + '°';
+        document.getElementById('metricEnergy').textContent =
+          computeEnergy(state).toFixed(2) + ' J';
+        document.getElementById('metricForce').textContent = commandedU.toFixed(1) + ' N';
+      }
+
+      // Drag Interaction
+      canvas.addEventListener('pointerdown', (e) => {
+        draggingCart = true;
+      });
+      window.addEventListener('pointerup', () => {
+        draggingCart = false;
+      });
+      canvas.addEventListener('pointermove', (e) => {
+        if (draggingCart) {
+          const rect = canvas.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const cx = canvas.width / 2;
+          const scale = 110;
+          const targetX = (mouseX - cx) / scale;
+          state[0] = Math.max(-2.8, Math.min(2.8, targetX));
+          state[1] = 0;
+        }
+      });
+
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>
