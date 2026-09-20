@@ -24,7 +24,7 @@ export function computeBalanceLQR(
   R: number = DEFAULT_R_BALANCE,
   p: PlantParams = DEFAULT_PLANT_PARAMS
 ): LQRResult {
-  const { A, B } = linearizeContinuous(STATE_UPRIGHT, 0, 1e-6, p);
+  const { A, B } = linearizeContinuous(STATE_UPRIGHT, 0, p);
   const Q = zeros2(STATE_DIM, STATE_DIM);
   for (let i = 0; i < STATE_DIM; i++) {
     Q[i][i] = Q_diag[i];
@@ -43,7 +43,7 @@ export function computeBrakeLQR(
   R: number = DEFAULT_R_BRAKE,
   p: PlantParams = DEFAULT_PLANT_PARAMS
 ): LQRResult {
-  const { A, B } = linearizeContinuous(STATE_HANGING, 0, 1e-6, p);
+  const { A, B } = linearizeContinuous(STATE_HANGING, 0, p);
   const Q = zeros2(STATE_DIM, STATE_DIM);
   for (let i = 0; i < STATE_DIM; i++) {
     Q[i][i] = Q_diag[i];

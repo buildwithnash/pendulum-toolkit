@@ -18,8 +18,8 @@ The double inverted pendulum on a cart is a classic benchmark in underactuated n
 
 This toolkit provides modern control pipelines in pure TypeScript, running with zero runtime dependencies in **Node.js, Bun, and modern browsers**:
 
-- **Continuous Algebraic Riccati Equation (CARE) Solver**: Steady-state LQR for upright balance and hanging brake.
-- **Iterative Linear Quadratic Regulator (iLQR / DDP)**: Gauss-Newton differential dynamic programming for non-linear swing-up trajectory optimization with soft state/control barriers.
+- **Continuous Algebraic Riccati Equation (CARE) Solver**: Steady-state LQR for upright balance and hanging brake, solved with the matrix sign function in about 55 µs.
+- **Iterative Linear Quadratic Regulator (iLQR / DDP)**: Gauss-Newton differential dynamic programming for non-linear swing-up trajectory optimization with soft state/control barriers, an exact analytic RK4 Jacobian, and a ready-made multi-stage `solveSwingUp` that plans the full 4 s swing-up in about 0.4 s.
 - **Time-Varying LQR (TVLQR)**: Discrete Riccati backward-pass gain scheduling along swing-up trajectories with continuous terminal handover.
 - **Real-Time Model Predictive Control (NMPC)**: Real-Time Iteration (RTI) 1-step tracking MPC and online reference-free Energy NMPC.
 - **Hardware Bench Simulation**: Simulates physical reality including Coulomb dry friction (stiction), loop transport latency (40ms+ delay), sensor quantization, and forward state prediction.
@@ -33,25 +33,38 @@ Read the complete technical deep dive and interactive essays at [davidnash.dev](
 
 1. **Frictionless Portability**: No C++ compilation toolchains (CMake, Eigen, BLAS), no Python virtualenv/wheel management, and no native binaries.
 2. **Universal Runtime**: The exact same mathematical models and controllers run in high-throughput Node.js microservices, edge workers, and client-side browser simulations at 60+ fps.
-3. **High Numerical Performance**: Uses preallocated flat typed buffers (`Float64Array`) and scalar reduction for single-actuator systems, achieving **< 0.5 ms solve times** for real-time MPC loops.
+3. **High Numerical Performance**: The physics, the Jacobians and the iLQR backward pass run on preallocated flat `Float64Array` buffers with an analytic Jacobian, so the inner loops allocate nothing. Measured on an Apple M3 Pro: a 0.8 s-horizon Energy NMPC step (5 iterations) takes about 0.4 ms and a 1-step RTI tracking MPC step about 0.06 ms.
 
 ---
 
 ## Performance Benchmarks
 
-Run on an Apple M-series processor (single-threaded JavaScript / V8):
+Measured on an Apple M3 Pro with Node v24.9.0 (single-threaded JavaScript / V8). The suite takes about 7 seconds.
 
-| Routine / Operation                         | Iterations | Mean Execution Time  | Max Throughput |
-| :------------------------------------------ | :--------- | :------------------- | :------------- |
-| **RK4 Physics Step (6D non-linear)**        | 100,000    | **~1.8 µs / step**   | > 500 kHz      |
-| **Continuous Riccati (CARE) Solve**         | 100        | **~4.5 ms / solve**  | ~220 Hz        |
-| **Tracking MPC (1-Step RTI Gauss-Newton)**  | 1,000      | **~0.35 ms / solve** | > 2,800 Hz     |
-| **From-Scratch Energy NMPC (5 iterations)** | 200        | **~1.6 ms / solve**  | ~600 Hz        |
+| Routine / Operation                         | Iterations | Mean Time | Max Frequency |
+| :------------------------------------------ | :--------- | :-------- | :------------ |
+| RK4 physics step (6D non-linear)            | 100,000    | 285 ns    | 3.5 MHz       |
+| RK4 step Jacobian, analytic (flat buffers)  | 100,000    | 966 ns    | 1.0 MHz       |
+| RK4 step Jacobian, analytic (nested arrays) | 100,000    | 2.66 us   | 376 kHz       |
+| RK4 step Jacobian, finite-difference        | 20,000     | 5.36 us   | 187 kHz       |
+| Continuous Riccati (CARE) solve             | 1,000      | 55 us     | 18 kHz        |
+| Tracking MPC (1-step RTI, 0.5 s horizon)    | 2,000      | 60 us     | 17 kHz        |
+| Energy NMPC (5 iterations, 0.8 s horizon)   | 300        | 416 us    | 2.4 kHz       |
+| Swing-up solve, analytic Jacobian           | 5          | 383 ms    | 3 Hz          |
+| Swing-up solve, finite-difference Jacobian  | 3          | 724 ms    | 1 Hz          |
+
+The swing-up solve is the full offline plan: 200 knots (4 s at 20 ms) and four continuation stages, roughly 550-700 iterations (the count varies slightly by platform). Your numbers will differ with your machine and Node version.
 
 Run the benchmark suite locally:
 
 ```bash
 pnpm run bench
+```
+
+To check the analytic Jacobian against finite differences and see where the time goes, run:
+
+```bash
+pnpm run verify:jacobian
 ```
 
 ---
@@ -98,46 +111,39 @@ for (let step = 0; step < 1000; step++) {
 
 ```typescript
 import {
-  ilqr,
+  solveSwingUp,
   computeTVLQR,
   computeBalanceLQR,
-  STATE_HANGING,
-  type CostFunction,
+  DEFAULT_Q_BALANCE,
+  DEFAULT_R_BALANCE,
 } from '@buildwithnash/pendulum-toolkit';
 
 const dt = 0.02; // 20 ms knot spacing
-const N = 200; // 4.0 second horizon
 
-// Define stage and terminal costs with track and actuator limits
-const cost: CostFunction = {
-  run(s, u) {
-    return 0.5 * 0.05 * u * u + 0.5 * (s[0] ** 2 + s[2] ** 2 + s[4] ** 2);
-  },
-  term(s) {
-    return 500 * (s[0] ** 2 + 10 * s[2] ** 2 + 10 * s[4] ** 2);
-  },
-  runDeriv(s, u) {
-    /* gradients & hessians */
-  },
-  termDeriv(s) {
-    /* terminal gradients & hessians */
-  },
-};
+// Plan the 4.0 s swing-up from hanging with four-stage iLQR (about 0.4 s on a laptop)
+const plan = solveSwingUp({ duration: 4.0, dt });
+console.log(plan.totalIters, plan.cost, plan.xs[plan.us.length]); // ends at upright
 
-const uGuess = new Array(N).fill(0);
-const trajectory = ilqr(STATE_HANGING, uGuess, dt, cost, { maxIter: 300 });
-
-// Compute TVLQR tracking gains K(t) initialized with steady-state balance P
+// Tracking gains K(t) along the plan. Seeding the backward pass with the balance controller's P and
+// using the same Q and R makes the last gains land on the balance gains (a bumpless handover).
 const balance = computeBalanceLQR();
 const trackingGains = computeTVLQR(
-  trajectory.xs,
-  trajectory.us,
+  plan.xs,
+  plan.us,
   dt,
-  [10, 1, 150, 10, 150, 10],
-  0.1,
+  DEFAULT_Q_BALANCE,
+  DEFAULT_R_BALANCE,
   balance.P
 );
 ```
+
+`pnpm run example:swingup` runs this end to end, including a closed-loop simulation that tracks the plan and then balances.
+
+Each stage tightens the terminal penalty starting from the previous solution (`DEFAULT_QF_STAGES`). Asking for a perfect landing from the first iteration stalls in a local minimum where the linkage flails without committing to a swing.
+
+iLQR is a local optimizer, so different random force guesses (`seed`, `initAmplitude`) can settle into different local optima. In a sweep of ten 4 s solves (five seeds, two guess amplitudes), all ten landed near 39 N with the analytic Jacobian and nine of ten did with finite differences. The exception, a 30 N swing, is the trajectory published at [davidnash.dev](https://davidnash.dev) (cost 1.896, 0.92 m cart travel). It is sensitive to tiny numerical differences, so `linearization: 'finite-difference'` is the option that reproduces it. Solve a few seeds and keep the best if effort matters.
+
+For your own cost function, pass a `CostFunction` to `ilqr(s0, uGuess, dt, cost)`. `createSwingUpCost` in [`src/solvers/swingup.ts`](src/solvers/swingup.ts) is a worked example.
 
 ---
 
@@ -289,6 +295,9 @@ pnpm run example:bench
 
 # Run full performance benchmark suite
 pnpm run bench
+
+# Check the analytic Jacobian against finite differences, and time it
+pnpm run verify:jacobian
 ```
 
 Run test suite:

@@ -6,6 +6,7 @@ export * from './core/dynamics.js';
 // Solvers
 export * from './solvers/riccati.js';
 export * from './solvers/ilqr.js';
+export * from './solvers/swingup.js';
 export * from './solvers/tvlqr.js';
 
 // Controllers

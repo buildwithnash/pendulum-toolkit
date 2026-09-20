@@ -36,13 +36,13 @@ A reference guide mapping mathematical notation from the control literature (Tod
 
 ### 3. Dynamics & Linearization Jacobians
 
-| Mathematical Symbol                             | Code Variable | Dimension    | Definition & Purpose                                                                                      |
-| :---------------------------------------------- | :------------ | :----------- | :-------------------------------------------------------------------------------------------------------- |
-| $\mathbf{M}(q)$                                 | `Mm`          | $3 \times 3$ | **Generalized Mass Matrix**: Non-linear inertial coupling between cart and joints.                        |
-| $\mathbf{C}(q, \dot{q})\dot{q} + \mathbf{G}(q)$ | `h1, h2, h3`  | $3 \times 1$ | **Non-inertial Forces**: Combined Coriolis, centrifugal, and gravity forces.                              |
-| $\mathbf{f}_x$ (or $\mathbf{A}$)                | `fx`, `A`     | $6 \times 6$ | **State Jacobian**: $\partial f / \partial x$ — sensitivity of next state to current state perturbations. |
-| $\mathbf{f}_u$ (or $\mathbf{B}$)                | `fu`, `B`     | $6 \times 1$ | **Control Jacobian**: $\partial f / \partial u$ — sensitivity of next state to control input changes.     |
-| $\epsilon$                                      | `eps`         | `number`     | Step size for finite-difference numerical gradients ($10^{-6}$).                                          |
+| Mathematical Symbol                             | Code Variable | Dimension    | Definition & Purpose                                                                                                                                                  |
+| :---------------------------------------------- | :------------ | :----------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| $\mathbf{M}(q)$                                 | `Mm`          | $3 \times 3$ | **Generalized Mass Matrix**: Non-linear inertial coupling between cart and joints.                                                                                    |
+| $\mathbf{C}(q, \dot{q})\dot{q} + \mathbf{G}(q)$ | `h1, h2, h3`  | $3 \times 1$ | **Non-inertial Forces**: Combined Coriolis, centrifugal, and gravity forces.                                                                                          |
+| $\mathbf{f}_x$ (or $\mathbf{A}$)                | `fx`, `A`     | $6 \times 6$ | **State Jacobian**: $\partial f / \partial x$ — sensitivity of next state to current state perturbations.                                                             |
+| $\mathbf{f}_u$ (or $\mathbf{B}$)                | `fu`, `B`     | $6 \times 1$ | **Control Jacobian**: $\partial f / \partial u$ — sensitivity of next state to control input changes.                                                                 |
+| $\epsilon$                                      | `eps`         | `number`     | Step size for the finite-difference reference Jacobians (`linearizeDiscreteFD`, `linearizeContinuousFD`) that the analytic Jacobians are checked against ($10^{-6}$). |
 
 ---
 

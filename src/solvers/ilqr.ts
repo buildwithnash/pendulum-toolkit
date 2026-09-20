@@ -7,8 +7,14 @@ import {
   PlantParams,
   DEFAULT_PLANT_PARAMS,
 } from '../core/types.js';
-import { rk4 } from '../core/dynamics.js';
-import { zeros, zeros2 } from '../core/math.js';
+import {
+  rk4,
+  rk4Into,
+  rk4JacobianInto,
+  getPrecomputed,
+  PrecomputedDynamics,
+} from '../core/dynamics.js';
+import { zeros2 } from '../core/math.js';
 
 export interface ILQROptions {
   /** Maximum number of optimization iterations, default 500 */
@@ -27,44 +33,87 @@ export interface ILQROptions {
   alphas?: number[];
   /** Whether to log iteration progress */
   verbose?: boolean;
-  /** Optional callback after each improved step */
+  /** Optional callback after each improved step. Receives copies, safe to keep. */
   onIter?: (info: { iter: number; cost: number; xs: State[]; us: number[] }) => void;
   /** Optional custom plant parameters */
   plant?: PlantParams;
+  /**
+   * How the backward pass linearizes the dynamics, default 'analytic'. 'finite-difference' is slower
+   * and differs from the analytic Jacobian by ~1e-9, which can change which local optimum iLQR
+   * finds. Use it to reproduce trajectories generated with it.
+   */
+  linearization?: 'analytic' | 'finite-difference';
 }
 
 const DEFAULT_ALPHAS = [1.0, 0.8, 0.6, 0.4, 0.25, 0.15, 0.08, 0.04, 0.02, 0.01, 0.005];
 
+const NX = STATE_DIM;
+
 /**
- * Finite-difference Jacobians of the discrete RK4 step at (s, u):
- * - fx = ∂f/∂x (6x6): Sensitivity of next state to current state
- * - fu = ∂f/∂u (6x1): Sensitivity of next state to control input
+ * Jacobians of one RK4 step at (s, u), written into flat arrays: fx = ∂f/∂x (6x6 row-major) and
+ * fu = ∂f/∂u (length 6). See {@link rk4JacobianInto}.
  */
+export function linearizeDiscreteInto(
+  fx: Float64Array,
+  fu: Float64Array,
+  s: ArrayLike<number>,
+  u: number,
+  dt: number,
+  p: PlantParams = DEFAULT_PLANT_PARAMS,
+  pre: PrecomputedDynamics = getPrecomputed(p)
+): void {
+  rk4JacobianInto(fx, fu, s, u, dt, p, pre);
+}
+
+/** {@link linearizeDiscreteInto} returning nested arrays: fx (6x6) and fu (6x1). */
 export function linearizeDiscrete(
+  s: State,
+  u: number,
+  dt: number,
+  p: PlantParams = DEFAULT_PLANT_PARAMS
+): { fx: number[][]; fu: number[][] } {
+  const fxFlat = new Float64Array(NX * NX);
+  const fuFlat = new Float64Array(NX);
+  rk4JacobianInto(fxFlat, fuFlat, s, u, dt, p);
+
+  const fx = zeros2(NX, NX);
+  const fu = zeros2(NX, CONTROL_DIM);
+  for (let i = 0; i < NX; i++) {
+    for (let j = 0; j < NX; j++) fx[i][j] = fxFlat[i * NX + j];
+    fu[i][0] = fuFlat[i];
+  }
+  return { fx, fu };
+}
+
+/**
+ * Central finite-difference Jacobians of one RK4 step (14 RK4 steps per call). A reference to check
+ * {@link linearizeDiscrete} against.
+ */
+export function linearizeDiscreteFD(
   s: State,
   u: number,
   dt: number,
   eps: number = 1e-6,
   p: PlantParams = DEFAULT_PLANT_PARAMS
 ): { fx: number[][]; fu: number[][] } {
-  const fx = zeros2(STATE_DIM, STATE_DIM);
-  const fu = zeros2(STATE_DIM, CONTROL_DIM);
+  const fx = zeros2(NX, NX);
+  const fu = zeros2(NX, CONTROL_DIM);
 
-  for (let j = 0; j < STATE_DIM; j++) {
+  for (let j = 0; j < NX; j++) {
     const sp = [...s] as State;
     const sm = [...s] as State;
     sp[j] += eps;
     sm[j] -= eps;
     const a = rk4(sp, u, dt, p);
     const b = rk4(sm, u, dt, p);
-    for (let i = 0; i < STATE_DIM; i++) {
+    for (let i = 0; i < NX; i++) {
       fx[i][j] = (a[i] - b[i]) / (2 * eps);
     }
   }
 
   const a = rk4(s, u + eps, dt, p);
   const b = rk4(s, u - eps, dt, p);
-  for (let i = 0; i < STATE_DIM; i++) {
+  for (let i = 0; i < NX; i++) {
     fu[i][0] = (a[i] - b[i]) / (2 * eps);
   }
 
@@ -81,9 +130,12 @@ export function rollout(
   p: PlantParams = DEFAULT_PLANT_PARAMS
 ): State[] {
   const N = us.length;
+  const pre = getPrecomputed(p);
   const xs: State[] = [[...s0] as State];
   for (let t = 0; t < N; t++) {
-    xs.push(rk4(xs[t], us[t], dt, p));
+    const next: State = [0, 0, 0, 0, 0, 0];
+    rk4Into(next, xs[t], us[t], dt, p, pre);
+    xs.push(next);
   }
   return xs;
 }
@@ -136,16 +188,43 @@ export function ilqr(
     verbose = false,
     onIter = null,
     plant = DEFAULT_PLANT_PARAMS,
+    linearization = 'analytic',
   } = options;
 
+  const useFiniteDifference = linearization === 'finite-difference';
+  const pre = getPrecomputed(plant);
   const N = usInit.length;
+
+  // Two trajectory buffers: the accepted one and the line-search candidate. They swap on success.
+  const newTrajectory = () => Array.from({ length: N + 1 }, () => [0, 0, 0, 0, 0, 0] as State);
+  let xs = newTrajectory();
+  let xsNew = newTrajectory();
   let us = usInit.slice();
-  let xs = rollout(s0, us, dt, plant);
+  let usNew = new Array<number>(N).fill(0);
+
+  xs[0] = [...s0] as State;
+  for (let t = 0; t < N; t++) rk4Into(xs[t + 1], xs[t], us[t], dt, plant, pre);
   let J = totalCost(xs, us, cost);
   let mu = muInit;
 
-  let Ks = Array.from({ length: N }, () => zeros(STATE_DIM));
-  let ks = zeros(N);
+  // Accepted gains and the candidate gains from the current backward pass (flat, N x 6).
+  let Ks = new Float64Array(N * NX);
+  let ks = new Float64Array(N);
+  let KsNew = new Float64Array(N * NX);
+  let ksNew = new Float64Array(N);
+
+  const fx = new Float64Array(NX * NX);
+  const fu = new Float64Array(NX);
+  const Vx = new Float64Array(NX);
+  const Vxx = new Float64Array(NX * NX);
+  const VxxNew = new Float64Array(NX * NX);
+  const Qx = new Float64Array(NX);
+  const Qxx = new Float64Array(NX * NX);
+  const Qux = new Float64Array(NX);
+  const VxxFx = new Float64Array(NX * NX);
+  const VxxFu = new Float64Array(NX);
+  const Kt = new Float64Array(NX);
+
   let converged = false;
   let iter = 0;
 
@@ -153,88 +232,75 @@ export function ilqr(
     // ---- 1. Backward Pass (Compute Value function & Control Policy) ----
     // Initialize Value function derivatives at terminal knot N using terminal cost l_f(x_N)
     const term = cost.termDeriv(xs[N], N);
-    const Vx = Array.from(term.lx); // Vx: ∂l_f/∂x (6x1)
-    const Vxx = zeros2(STATE_DIM, STATE_DIM); // Vxx: ∂²l_f/∂x² (6x6)
-    for (let i = 0; i < STATE_DIM; i++) {
-      Vxx[i][i] = term.lxxDiag[i];
+    Vxx.fill(0);
+    for (let i = 0; i < NX; i++) {
+      Vx[i] = term.lx[i];
+      Vxx[i * NX + i] = term.lxxDiag[i];
     }
 
-    const KsNew = Array.from({ length: N }, () => zeros(STATE_DIM));
-    const ksNew = zeros(N);
     let dV1 = 0; // 1st-order expected cost reduction
     let dV2 = 0; // 2nd-order expected cost reduction
     let passOk = true;
 
     for (let t = N - 1; t >= 0; t--) {
       // Linearize discrete dynamics at current knot: x_{t+1} ≈ fx * δx + fu * δu
-      const { fx, fu } = linearizeDiscrete(xs[t], us[t], dt, 1e-6, plant);
+      if (useFiniteDifference) {
+        const fd = linearizeDiscreteFD(xs[t], us[t], dt, 1e-6, plant);
+        for (let i = 0; i < NX; i++) {
+          for (let j = 0; j < NX; j++) fx[i * NX + j] = fd.fx[i][j];
+          fu[i] = fd.fu[i][0];
+        }
+      } else {
+        rk4JacobianInto(fx, fu, xs[t], us[t], dt, plant, pre);
+      }
       const stage = cost.runDeriv(xs[t], us[t], t);
 
       // Qx = lx + fx^T * Vx (State gradient of Q-function)
-      const Qx = zeros(STATE_DIM);
-      for (let i = 0; i < STATE_DIM; i++) {
+      for (let i = 0; i < NX; i++) {
         let acc = stage.lx[i];
-        for (let k = 0; k < STATE_DIM; k++) {
-          acc += fx[k][i] * Vx[k];
-        }
+        for (let k = 0; k < NX; k++) acc += fx[k * NX + i] * Vx[k];
         Qx[i] = acc;
       }
 
       // Qu = lu + fu^T * Vx (Control gradient of Q-function, scalar)
       let Qu = stage.lu;
-      for (let k = 0; k < STATE_DIM; k++) {
-        Qu += fu[k][0] * Vx[k];
-      }
+      for (let k = 0; k < NX; k++) Qu += fu[k] * Vx[k];
 
       // Intermediate matrix: Vxx * fx (6x6)
-      const VxxFx = zeros2(STATE_DIM, STATE_DIM);
-      for (let i = 0; i < STATE_DIM; i++) {
-        for (let j = 0; j < STATE_DIM; j++) {
+      for (let i = 0; i < NX; i++) {
+        for (let j = 0; j < NX; j++) {
           let acc = 0;
-          for (let k = 0; k < STATE_DIM; k++) {
-            acc += Vxx[i][k] * fx[k][j];
-          }
-          VxxFx[i][j] = acc;
+          for (let k = 0; k < NX; k++) acc += Vxx[i * NX + k] * fx[k * NX + j];
+          VxxFx[i * NX + j] = acc;
         }
       }
 
       // Intermediate vector: Vxx * fu (6x1)
-      const VxxFu = zeros(STATE_DIM);
-      for (let i = 0; i < STATE_DIM; i++) {
+      for (let i = 0; i < NX; i++) {
         let acc = 0;
-        for (let k = 0; k < STATE_DIM; k++) {
-          acc += Vxx[i][k] * fu[k][0];
-        }
+        for (let k = 0; k < NX; k++) acc += Vxx[i * NX + k] * fu[k];
         VxxFu[i] = acc;
       }
 
       // Qxx = lxx + fx^T * Vxx * fx (State-state curvature of Q)
-      const Qxx = zeros2(STATE_DIM, STATE_DIM);
-      for (let i = 0; i < STATE_DIM; i++) {
-        for (let j = 0; j < STATE_DIM; j++) {
+      for (let i = 0; i < NX; i++) {
+        for (let j = 0; j < NX; j++) {
           let acc = i === j ? stage.lxxDiag[i] : 0;
-          for (let k = 0; k < STATE_DIM; k++) {
-            acc += fx[k][i] * VxxFx[k][j];
-          }
-          Qxx[i][j] = acc;
+          for (let k = 0; k < NX; k++) acc += fx[k * NX + i] * VxxFx[k * NX + j];
+          Qxx[i * NX + j] = acc;
         }
       }
 
       // Qux = fu^T * Vxx * fx (Cross-coupling curvature, 1x6)
-      const Qux = zeros(STATE_DIM);
-      for (let j = 0; j < STATE_DIM; j++) {
+      for (let j = 0; j < NX; j++) {
         let acc = 0;
-        for (let k = 0; k < STATE_DIM; k++) {
-          acc += fu[k][0] * VxxFx[k][j];
-        }
+        for (let k = 0; k < NX; k++) acc += fu[k] * VxxFx[k * NX + j];
         Qux[j] = acc;
       }
 
       // Quu = luu + fu^T * Vxx * fu (Control-control curvature, scalar)
       let Quu = stage.luu;
-      for (let k = 0; k < STATE_DIM; k++) {
-        Quu += fu[k][0] * VxxFu[k];
-      }
+      for (let k = 0; k < NX; k++) Quu += fu[k] * VxxFu[k];
 
       // Levenberg-Marquardt regularization: ensure strictly positive curvature
       const QuuReg = Quu + mu;
@@ -247,9 +313,11 @@ export function ilqr(
       // k_t = -Qu / (Quu + mu)
       // K_t = -Qux / (Quu + mu)
       const k_t = -Qu / QuuReg;
-      const K_t = Qux.map((z) => -z / QuuReg);
       ksNew[t] = k_t;
-      KsNew[t] = K_t;
+      for (let j = 0; j < NX; j++) {
+        Kt[j] = -Qux[j] / QuuReg;
+        KsNew[t * NX + j] = Kt[j];
+      }
 
       // Accumulate expected cost improvements
       dV1 += k_t * Qu;
@@ -257,22 +325,22 @@ export function ilqr(
 
       // Propagate Value function backwards to previous knot:
       // Vx = Qx + K_t^T * Quu * k_t + K_t^T * Qu + Qux^T * k_t
-      for (let i = 0; i < STATE_DIM; i++) {
-        Vx[i] = Qx[i] + K_t[i] * Quu * k_t + K_t[i] * Qu + Qux[i] * k_t;
+      for (let i = 0; i < NX; i++) {
+        Vx[i] = Qx[i] + Kt[i] * Quu * k_t + Kt[i] * Qu + Qux[i] * k_t;
       }
 
       // Vxx = Qxx + K_t^T * Quu * K_t + K_t^T * Qux + Qux^T * K_t (symmetrized)
-      const VxxNew = zeros2(STATE_DIM, STATE_DIM);
-      for (let i = 0; i < STATE_DIM; i++) {
-        for (let j = 0; j < STATE_DIM; j++) {
-          VxxNew[i][j] = Qxx[i][j] + K_t[i] * Quu * K_t[j] + K_t[i] * Qux[j] + Qux[i] * K_t[j];
+      for (let i = 0; i < NX; i++) {
+        for (let j = 0; j < NX; j++) {
+          VxxNew[i * NX + j] =
+            Qxx[i * NX + j] + Kt[i] * Quu * Kt[j] + Kt[i] * Qux[j] + Qux[i] * Kt[j];
         }
       }
-      for (let i = 0; i < STATE_DIM; i++) {
-        for (let j = i; j < STATE_DIM; j++) {
-          const val = 0.5 * (VxxNew[i][j] + VxxNew[j][i]);
-          Vxx[i][j] = val;
-          Vxx[j][i] = val;
+      for (let i = 0; i < NX; i++) {
+        for (let j = i; j < NX; j++) {
+          const val = 0.5 * (VxxNew[i * NX + j] + VxxNew[j * NX + i]);
+          Vxx[i * NX + j] = val;
+          Vxx[j * NX + i] = val;
         }
       }
     }
@@ -287,19 +355,16 @@ export function ilqr(
     // ---- 2. Forward Pass with Backtracking Line Search ----
     let improved = false;
     let bestJ = J;
-    let bestXs = xs;
-    let bestUs = us;
 
     for (const a of alphas) {
-      const xsNew: State[] = [[...s0] as State];
-      const usNew = zeros(N);
+      for (let i = 0; i < NX; i++) xsNew[0][i] = s0[i];
       let invalid = false;
 
       for (let t = 0; t < N; t++) {
         // Control update: u_new = u_nominal + α * k_t + K_t * (x_new - x_nominal)
         let du = a * ksNew[t];
-        for (let i = 0; i < STATE_DIM; i++) {
-          du += KsNew[t][i] * (xsNew[t][i] - xs[t][i]);
+        for (let i = 0; i < NX; i++) {
+          du += KsNew[t * NX + i] * (xsNew[t][i] - xs[t][i]);
         }
         const u = us[t] + du;
         if (!Number.isFinite(u)) {
@@ -307,12 +372,19 @@ export function ilqr(
           break;
         }
         usNew[t] = u;
-        const nextState = rk4(xsNew[t], u, dt, plant);
-        if (!nextState.every(Number.isFinite)) {
+        rk4Into(xsNew[t + 1], xsNew[t], u, dt, plant, pre);
+        const next = xsNew[t + 1];
+        if (!(
+          Number.isFinite(next[0]) &&
+          Number.isFinite(next[1]) &&
+          Number.isFinite(next[2]) &&
+          Number.isFinite(next[3]) &&
+          Number.isFinite(next[4]) &&
+          Number.isFinite(next[5])
+        )) {
           invalid = true;
           break;
         }
-        xsNew.push(nextState);
       }
 
       if (invalid) continue;
@@ -324,8 +396,6 @@ export function ilqr(
       // Armijo condition check
       if (Jnew < J && (expected <= 0 || ratio > 1e-4)) {
         bestJ = Jnew;
-        bestXs = xsNew;
-        bestUs = usNew;
         improved = true;
         break;
       }
@@ -333,13 +403,17 @@ export function ilqr(
 
     if (improved) {
       const dJ = J - bestJ;
-      xs = bestXs;
-      us = bestUs;
-      J = bestJ;
-      Ks = KsNew;
-      ks = ksNew;
 
-      if (onIter) onIter({ iter, cost: J, xs, us });
+      // Accept the candidate: swap buffers instead of copying.
+      [xs, xsNew] = [xsNew, xs];
+      [us, usNew] = [usNew, us];
+      [Ks, KsNew] = [KsNew, Ks];
+      [ks, ksNew] = [ksNew, ks];
+      J = bestJ;
+
+      if (onIter) {
+        onIter({ iter, cost: J, xs: xs.map((x) => [...x] as State), us: us.slice() });
+      }
       mu = Math.max(muMin, mu / muFactor); // Decrease damping on success
 
       if (verbose && iter % 25 === 0) {
@@ -357,5 +431,13 @@ export function ilqr(
     }
   }
 
-  return { xs, us, Ks, ks, cost: J, iters: iter, converged };
+  return {
+    xs,
+    us,
+    Ks: Array.from({ length: N }, (_, t) => Array.from(Ks.subarray(t * NX, (t + 1) * NX))),
+    ks: Array.from(ks),
+    cost: J,
+    iters: iter,
+    converged,
+  };
 }

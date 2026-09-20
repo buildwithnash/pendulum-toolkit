@@ -22,6 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "bench": "tsx examples/05-benchmark.ts",
+    "verify:jacobian": "tsx examples/06-verify-jacobian.ts",
     "example:swingup": "tsx examples/01-solve-swingup.ts",
     "example:lqr": "tsx examples/02-balance-and-brake.ts",
     "example:nmpc": "tsx examples/03-realtime-nmpc.ts",
