@@ -38,12 +38,12 @@ export function createEnergyCost(
 ): CostFunction {
   const {
     R = 0.08,
-    Q_cart = 4.0,
+    Q_cart = 5.0,
     Q_w = 0.3,
     W_energy = 150.0,
     W_bowl = 1500.0,
     W_lqr = 1.0,
-    gateAngle = 0.05,
+    gateAngle = 0.08,
     gateRate = 2.0,
   } = options;
 
@@ -156,6 +156,8 @@ export class EnergyNMPC {
   public cost: CostFunction;
   public plant: PlantParams;
   public options: EnergyNmpcOptions;
+  private lastT: number = -1;
+  private shiftBuffer: number[] = [];
 
   constructor(
     horizonSeconds: number = 1.0,
@@ -168,7 +170,14 @@ export class EnergyNMPC {
     this.options = options;
     this.horizonSteps = Math.max(2, Math.round(horizonSeconds / dt));
     this.us = new Array(this.horizonSteps).fill(0).map(() => (Math.random() - 0.5) * 0.1);
+    this.shiftBuffer = new Array(this.horizonSteps).fill(0);
     this.cost = createEnergyCost(this.plant, undefined, options);
+  }
+
+  reset(): void {
+    this.lastT = -1;
+    this.us = new Array(this.horizonSteps).fill(0).map(() => (Math.random() - 0.5) * 0.1);
+    this.predictedXs = [];
   }
 
   setHorizon(horizonSeconds: number) {
@@ -180,19 +189,54 @@ export class EnergyNMPC {
       }
       this.us = newUs;
       this.horizonSteps = newSteps;
+      this.shiftBuffer = new Array(this.horizonSteps).fill(0);
       this.cost = createEnergyCost(this.plant, undefined, this.options);
+      this.lastT = -1;
     }
   }
 
   /**
    * Computes control command by optimizing receding horizon.
+   *
+   * @param s - Current system state [x, v, θ1, ω1, θ2, ω2]
+   * @param maxIter - Maximum iLQR optimization iterations (default 20)
+   * @param tol - Convergence cost change tolerance (default 1e-3)
+   * @param t - Optional simulation timestamp. When provided, warm-starting continuously interpolates
+   *            control actions based on actual elapsed time (t - lastT), keeping the horizon synchronized
+   *            at high control loop frequencies (e.g. 100 Hz, 200 Hz) without discarding future steps.
    */
-  computeControl(s: State, maxIter: number = 20, tol: number = 1e-3): number {
-    // Warm-start: shift buffer left
-    for (let i = 0; i < this.horizonSteps - 1; i++) {
-      this.us[i] = this.us[i + 1];
+  computeControl(s: State, maxIter: number = 20, tol: number = 1e-3, t?: number): number {
+    if (t !== undefined) {
+      if (this.lastT < 0 || t < this.lastT) {
+        this.lastT = t;
+      }
+      const dtElapsed = t - this.lastT;
+      this.lastT = t;
+
+      const shiftKnots = dtElapsed / this.dt;
+      if (shiftKnots > 0) {
+        if (this.shiftBuffer.length !== this.horizonSteps) {
+          this.shiftBuffer = new Array(this.horizonSteps).fill(0);
+        }
+        for (let i = 0; i < this.horizonSteps; i++) {
+          const srcIdx = i + shiftKnots;
+          const idx0 = Math.floor(srcIdx);
+          const frac = srcIdx - idx0;
+          const u0 = idx0 < this.horizonSteps ? this.us[idx0] : 0;
+          const u1 = idx0 + 1 < this.horizonSteps ? this.us[idx0 + 1] : 0;
+          this.shiftBuffer[i] = u0 * (1 - frac) + u1 * frac;
+        }
+        for (let i = 0; i < this.horizonSteps; i++) {
+          this.us[i] = this.shiftBuffer[i];
+        }
+      }
+    } else {
+      // Warm-start: shift buffer left by 1 knot (assumes control interval == knot dt)
+      for (let i = 0; i < this.horizonSteps - 1; i++) {
+        this.us[i] = this.us[i + 1];
+      }
+      this.us[this.horizonSteps - 1] = 0;
     }
-    this.us[this.horizonSteps - 1] = 0;
 
     const result = ilqr(s, this.us, this.dt, this.cost, {
       maxIter,

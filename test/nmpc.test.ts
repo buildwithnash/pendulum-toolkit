@@ -32,4 +32,21 @@ describe('Real-Time Nonlinear MPC', () => {
     expect(Number.isFinite(u)).toBe(true);
     expect(nmpc.predictedXs.length).toBeGreaterThan(0);
   });
+
+  it('should support time-interpolated continuous warm starting and reset', () => {
+    const nmpc = new EnergyNMPC(0.8, 0.02);
+    const s: State = [0, 0, Math.PI, 0, Math.PI, 0];
+
+    // High-frequency control calls at 200 Hz (5ms step)
+    const u0 = nmpc.computeControl(s, 5, 1e-2, 0.0);
+    const u1 = nmpc.computeControl(s, 5, 1e-2, 0.005);
+    const u2 = nmpc.computeControl(s, 5, 1e-2, 0.01);
+
+    expect(Number.isFinite(u0)).toBe(true);
+    expect(Number.isFinite(u1)).toBe(true);
+    expect(Number.isFinite(u2)).toBe(true);
+
+    nmpc.reset();
+    expect(nmpc.predictedXs.length).toBe(0);
+  });
 });
