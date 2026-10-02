@@ -155,6 +155,7 @@ export class EnergyNMPC {
   public predictedXs: State[] = [];
   public cost: CostFunction;
   public plant: PlantParams;
+  public options: EnergyNmpcOptions;
 
   constructor(
     horizonSeconds: number = 1.0,
@@ -164,6 +165,7 @@ export class EnergyNMPC {
   ) {
     this.plant = plant;
     this.dt = dt;
+    this.options = options;
     this.horizonSteps = Math.max(2, Math.round(horizonSeconds / dt));
     this.us = new Array(this.horizonSteps).fill(0).map(() => (Math.random() - 0.5) * 0.1);
     this.cost = createEnergyCost(this.plant, undefined, options);
@@ -178,7 +180,7 @@ export class EnergyNMPC {
       }
       this.us = newUs;
       this.horizonSteps = newSteps;
-      this.cost = createEnergyCost(this.plant);
+      this.cost = createEnergyCost(this.plant, undefined, this.options);
     }
   }
 

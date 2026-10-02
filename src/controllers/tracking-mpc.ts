@@ -31,7 +31,7 @@ export function createTrackingCost(
   dt: number,
   weights: TrackingCostWeights = {}
 ): CostFunction {
-  const { Q = [10, 1, 200, 10, 200, 10], R = 0.5, Q_terminal_scale = 10.0 } = weights;
+  const { Q = [10, 6, 200, 10, 200, 10], R = 0.08, Q_terminal_scale = 10.0 } = weights;
 
   const lxRun = new Float64Array(STATE_DIM);
   const lxxRun = new Float64Array(STATE_DIM);
@@ -108,18 +108,21 @@ export class TrackingMPC {
   public predictedXs: State[] = [];
   public trajectory: TrajectoryInterpolation;
   public plant: PlantParams;
+  public weights: TrackingCostWeights;
 
   constructor(
     trajectory: TrajectoryInterpolation,
-    horizonSeconds: number = 0.5,
+    horizonSeconds: number = 0.8,
     dt: number = 0.02,
-    plant: PlantParams = DEFAULT_PLANT_PARAMS
+    plant: PlantParams = DEFAULT_PLANT_PARAMS,
+    weights: TrackingCostWeights = {}
   ) {
     this.trajectory = trajectory;
     this.dt = dt;
     this.horizonSteps = Math.max(2, Math.round(horizonSeconds / dt));
-    this.us = new Array(this.horizonSteps).fill(0);
+    this.us = new Array(this.horizonSteps).fill(0).map((_, i) => trajectory.getControl(i * dt));
     this.plant = plant;
+    this.weights = weights;
   }
 
   setHorizon(horizonSeconds: number) {
@@ -128,6 +131,9 @@ export class TrackingMPC {
       const newUs = new Array(newSteps).fill(0);
       for (let i = 0; i < Math.min(newSteps, this.horizonSteps); i++) {
         newUs[i] = this.us[i];
+      }
+      for (let i = this.horizonSteps; i < newSteps; i++) {
+        newUs[i] = this.trajectory.getControl(i * this.dt);
       }
       this.us = newUs;
       this.horizonSteps = newSteps;
@@ -145,7 +151,7 @@ export class TrackingMPC {
     this.us[this.horizonSteps - 1] = this.trajectory.getControl(t + this.horizonSteps * this.dt);
 
     // 2. Build tracking cost for current window
-    const cost = createTrackingCost(this.trajectory, t, this.dt);
+    const cost = createTrackingCost(this.trajectory, t, this.dt, this.weights);
 
     // 3. Single Gauss-Newton iteration
     const result = ilqr(s, this.us, this.dt, cost, {

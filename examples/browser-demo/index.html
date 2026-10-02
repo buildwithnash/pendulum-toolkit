@@ -1243,22 +1243,23 @@
         }
       }
 
-      // Physics & Control Loop (Matches Portfolio LiveNmpc.svelte architecture)
+      // Physics & Control Loop
       let lastTs = 0;
       let simT = 0;
+      let accumulator = 0;
+      const PHYSICS_DT = 0.001;
 
       function loop(timestamp) {
         if (!lastTs) lastTs = timestamp;
         const controlPeriodSec = 1.0 / controlHz;
-        const PHYSICS_DT = controlPeriodSec / 2; // Exactly 2 physics integration substeps per control period
 
         if (userMode === 'nmpc') {
-          // Slow-motion 0.5x scaling gives CPU budget headroom for smooth 100/200Hz iLQR solve (Matches LiveNmpc.svelte)
           const frameDuration = Math.min((timestamp - lastTs) / 1000, 0.05) * 0.5;
           lastTs = timestamp;
-          const steps = Math.max(1, Math.round(frameDuration / PHYSICS_DT));
+          accumulator += frameDuration;
+          if (accumulator > 0.1) accumulator = 0.1;
 
-          for (let i = 0; i < steps; i++) {
+          while (accumulator >= PHYSICS_DT) {
             if (isDragging) {
               commandedForce = clamp(
                 300 * (dragTargetX - st[0]) - 60 * st[1],
@@ -1266,7 +1267,7 @@
                 FORCE_LIMIT
               );
             } else {
-              if (simT - lastNmpcTime >= controlPeriodSec) {
+              if (simT - lastNmpcTime >= controlPeriodSec - 1e-6) {
                 lastNmpcTime = simT;
                 const startCpu = performance.now();
                 commandedForce = mpc.computeControl(st);
@@ -1277,12 +1278,14 @@
 
             stepEuler(st, commandedForce, PHYSICS_DT);
             simT += PHYSICS_DT;
+            accumulator -= PHYSICS_DT;
 
             // Catch divergence
             if (!st.every(Number.isFinite) || Math.abs(st[0]) > 6.0) {
               st = [0, 0, Math.PI, 0, Math.PI, 0];
               mpc = new FromScratchMPC(horizonSeconds, 0.02);
               lastNmpcTime = -999;
+              accumulator = 0;
               break;
             }
           }
